@@ -153,11 +153,11 @@ async function postOrUpdateStaffList(guild, channel) {
     cachedStaffMessageId = newMsg.id;
 }
 
-async function runQuotaEvaluation(guild, targetChannel, replyMessage = null) {
+async function runQuotaEvaluation(guild, targetChannel, triggerMessage = null) {
     const punishmentChannel = guild.channels.cache.get(PUNISHMENT_LOGS_ID);
     if (!punishmentChannel) {
         const errText = '❌ Quota error: Punishment logs channel could not be found.';
-        if (replyMessage) await replyMessage.edit(errText);
+        if (triggerMessage) await triggerMessage.edit(errText);
         else await targetChannel.send(errText);
         return;
     }
@@ -185,8 +185,8 @@ async function runQuotaEvaluation(guild, targetChannel, replyMessage = null) {
         }
     });
 
-    let passedList = [];
-    let failedList = [];
+    // Generate formatted cards mimicking the exact clean aesthetic requested
+    let generatedCards = [];
 
     for (const rank of QUOTA_RANKS) {
         const role = guild.roles.cache.get(rank.id);
@@ -200,46 +200,31 @@ async function runQuotaEvaluation(guild, targetChannel, replyMessage = null) {
             const count = staffActionCounts[memberId] || 0;
             const passed = rank.quota === 0 || count >= rank.quota;
 
-            const entryText = `${member} (${rank.name}) — **${count} / ${rank.quota}** logs`;
+            const cardEmbed = new EmbedBuilder()
+                .setColor(passed ? 0x2ecc71 : 0xe74c3c)
+                .setTitle('📊 Weekly Staff Quota Report')
+                .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
+                .addFields(
+                    { name: 'Staff Member', value: `${member} (${rank.name})`, inline: false },
+                    { name: 'Status', value: passed ? '✅ Completed / Passed' : '❌ Failed Quota', inline: true },
+                    { name: 'Period', value: `Sunday -> Sunday`, inline: true },
+                    { name: 'Punishment Logs Quota', value: `${count} / ${rank.quota} COMPLETED`, inline: false },
+                    { name: 'Ticket & Activity Quota', value: `Tracked via server metrics`, inline: false }
+                )
+                .setFooter({ text: `Automatically generated weekly staff activity report` })
+                .setTimestamp();
 
-            if (passed) {
-                passedList.push(entryText);
-            } else {
-                failedList.push(entryText);
-            }
+            generatedCards.push(cardEmbed);
         }
     }
 
-    let description = '';
-
-    // Category 1: Passed / Exempt
-    description += `### 🟢 Passed & Exempt Staff\n`;
-    if (passedList.length > 0) {
-        description += passedList.map(item => `• ${item}`).join('\n');
-    } else {
-        description += `> *None*\n`;
-    }
-    description += `\n\n`;
-
-    // Category 2: Failed Quota
-    description += `### 🔴 Failed Quota\n`;
-    if (failedList.length > 0) {
-        description += failedList.map(item => `• ${item}`).join('\n');
-    } else {
-        description += `> *None — All staff met their quotas!*\n`;
+    if (triggerMessage) {
+        await triggerMessage.edit({ content: `📊 Generated **${generatedCards.length}** staff quota evaluation cards:`, embeds: [] });
     }
 
-    const leaderboardEmbed = new EmbedBuilder()
-        .setColor(failedList.length > 0 ? 0xe74c3c : 0x2ecc71)
-        .setTitle('📊 Weekly Staff Quota Leaderboard')
-        .setDescription(description)
-        .setFooter({ text: `Weekly Evaluation Report • Sunday to Sunday` })
-        .setTimestamp();
-
-    if (replyMessage) {
-        await replyMessage.edit({ content: null, embeds: [leaderboardEmbed] });
-    } else {
-        await targetChannel.send({ embeds: [leaderboardEmbed] });
+    // Send each card sequentially to prevent flooding limits while cleanly stacking them
+    for (const embed of generatedCards) {
+        await targetChannel.send({ embeds: [embed] });
     }
 }
 
@@ -263,7 +248,7 @@ client.on('messageCreate', async message => {
         const quotaChannel = message.guild.channels.cache.get(QUOTA_LOGS_CHANNEL_ID);
         if (!quotaChannel) return message.reply('❌ Quota logs channel not found.');
 
-        const initialReply = await message.reply('🔄 Generating separated quota leaderboard...');
+        const initialReply = await message.reply('🔄 Processing structured quota report cards...');
         await runQuotaEvaluation(message.guild, quotaChannel, initialReply);
         return;
     }

@@ -15,8 +15,8 @@ const client = new Client({
 });
 
 // --- CONFIGURATION: PUT YOUR EXACT DISCORD IDs HERE ---
-const STAFF_LIST_CHANNEL_ID = '1568897439325356124'; 
-const PUNISHMENT_LOGS_ID = '1568897295385100338';
+const STAFF_LIST_CHANNEL_ID = '1568917305336004694'; 
+const PUNISHMENT_LOGS_ID = '1568917352710676601';
 
 // Map your role IDs to their titles and minimum weekly punishment quotas
 const RANK_CONFIG = {

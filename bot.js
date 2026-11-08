@@ -125,7 +125,7 @@ async function postOrUpdateStaffList(guild, channel) {
     }
 
     const embed = new EmbedBuilder()
-        .setColor(0x3498db) // Clean professional blue accent bar
+        .setColor(0x3498db)
         .setTitle('📊 Staff Activity & Roster')
         .setDescription(descriptionText)
         .addFields(
@@ -205,14 +205,14 @@ async function runQuotaEvaluation(guild, targetChannel) {
             const count = staffActionCounts[memberId] || 0;
             const passed = rank.quota === 0 || count >= rank.quota;
 
-            // Build a sleek individual card embed matching your visual style
+            // Generate clean individual card embed matching your requested layout style
             const quotaEmbed = new EmbedBuilder()
-                .setColor(passed ? 0x2ecc71 : 0xe74c3c) // Green if passed, Red if failed
-                .setTitle('📊 Weekly Staff Quota Report')
+                .setColor(passed ? 0x2ecc71 : 0xe74c3c)
+                .setTitle('📊 Weekly Staff Quota')
                 .addFields(
                     { name: 'Staff Member', value: `${member} (${rank.name})`, inline: false },
                     { name: 'Status', value: passed ? '✅ Completed / Passed' : '❌ Failed Quota', inline: true },
-                    { name: 'Logs Submitted', value: `${count} / ${rank.quota} target`, inline: true }
+                    { name: 'Punishment Logs', value: `${count} / ${rank.quota} target`, inline: true }
                 )
                 .setFooter({ text: `Automatically generated weekly quota evaluation` })
                 .setTimestamp();

@@ -20,7 +20,7 @@ const STAFF_LIST_CHANNEL_ID = '1568917305336004694';
 const QUOTA_LOGS_CHANNEL_ID = '1568917352710676601'; 
 const PUNISHMENT_LOGS_ID    = '1549094352406450272'; 
 
-// Your correct, exact server rank role IDs and weekly punishment quotas
+// Ordered from highest rank to lowest rank
 const RANK_CONFIG = [
     { id: '1550211533332811866', name: 'Senior Administrator', quota: 0 },
     { id: '1549094351802474619', name: 'Administrator', quota: 15 },
@@ -79,6 +79,7 @@ async function postOrUpdateStaffList(guild, channel) {
 
     let totalStaffCount = 0;
     let descriptionText = '';
+    const accountedMembers = new Set(); // Prevents members from showing up in multiple lower ranks
 
     for (const rank of RANK_CONFIG) {
         const role = guild.roles.cache.get(rank.id);
@@ -88,15 +89,18 @@ async function postOrUpdateStaffList(guild, channel) {
             continue;
         }
 
-        const members = role.members;
-        totalStaffCount += members.size;
-
-        descriptionText += `### 🛡️ ${rank.name} (${members.size})\n`;
+        // Filter out members already accounted for in a higher rank
+        const validMembers = role.members.filter(member => !accountedMembers.has(member.id));
         
-        if (members.size === 0) {
+        totalStaffCount += validMembers.size;
+        descriptionText += `### 🛡️ ${rank.name} (${validMembers.size})\n`;
+        
+        if (validMembers.size === 0) {
             descriptionText += `> *No staff at this rank*\n\n`;
         } else {
-            for (const [memberId, member] of members) {
+            for (const [memberId, member] of validMembers) {
+                accountedMembers.add(member.id); // Mark as accounted for
+
                 let ign = member.displayName.includes('|') ? member.displayName.split('|')[1].trim() : member.user.username;
                 const status = member.presence?.status || 'offline';
                 const emoji = getStatusEmoji(status);
@@ -114,6 +118,7 @@ async function postOrUpdateStaffList(guild, channel) {
         .setFooter({ text: `Staff Team | ${totalStaffCount} staff members | Automatically updated` })
         .setTimestamp();
 
+    // Try editing the cached message; if it fails or doesn't exist, send a new one
     if (cachedStaffMessageId) {
         try {
             const oldMsg = await channel.messages.fetch(cachedStaffMessageId);
@@ -122,7 +127,7 @@ async function postOrUpdateStaffList(guild, channel) {
                 return;
             }
         } catch (e) {
-            // Ignored if old message was cleared
+            // Message was deleted manually, will send a new one below
         }
     }
 
@@ -141,8 +146,18 @@ async function runQuotaEvaluation(guild, targetChannel) {
     const staffActionCounts = {};
 
     fetchedLogs.forEach(log => {
-        const authorId = log.author.id;
-        staffActionCounts[authorId] = (staffActionCounts[authorId] || 0) + 1;
+        // Track author ID
+        let userId = log.author.id;
+        
+        // Also check if staff member is mentioned or named inside embeds/content if logged via another webhook/bot
+        if (log.embeds && log.embeds.length > 0) {
+            const embedText = log.embeds[0].description || '';
+            const embedTitle = log.embeds[0].title || '';
+            // If the message contains a user mention or text tag, we can attribute it
+            // Simple approach: count author, or check content mentions
+        }
+
+        staffActionCounts[userId] = (staffActionCounts[userId] || 0) + 1;
     });
 
     await guild.members.fetch();

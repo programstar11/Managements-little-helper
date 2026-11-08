@@ -20,7 +20,7 @@ const STAFF_LIST_CHANNEL_ID = '1568917305336004694';
 const QUOTA_LOGS_CHANNEL_ID = '1568917352710676601'; 
 const PUNISHMENT_LOGS_ID    = '1549094352406450272'; 
 
-// Full hierarchy used for the Staff List embed (All Ranks)
+// Full hierarchy used for the Staff List embed
 const STAFF_LIST_RANKS = [
     { id: '1549094351810854997', name: 'Owner' },
     { id: '1549094351810854994', name: 'Manager' },
@@ -32,8 +32,11 @@ const STAFF_LIST_RANKS = [
     { id: '1549094351794348178', name: 'Trainee' }
 ];
 
-// Restricted hierarchy used ONLY for Quota checks (Admin down to Trainee, excluding Owner/Manager/Sr. Admin)
+// Quota configuration (Includes higher management roles so they aren't skipped, but with 0 quota targets)
 const QUOTA_RANKS = [
+    { id: '1549094351810854997', name: 'Owner', quota: 0 },
+    { id: '1549094351810854994', name: 'Manager', quota: 0 },
+    { id: '1550211533332811866', name: 'Senior Administrator', quota: 0 },
     { id: '1549094351802474619', name: 'Administrator', quota: 15 },
     { id: '1549094351794348182', name: 'Senior Moderator', quota: 10 },
     { id: '1549094351794348181', name: 'Moderator', quota: 8 },
@@ -128,7 +131,6 @@ async function postOrUpdateStaffList(guild, channel) {
         .setFooter({ text: `Staff Team | ${totalStaffCount} staff members | Automatically updated` })
         .setTimestamp();
 
-    // Try to find the last bot message in the channel if cache is empty
     if (!cachedStaffMessageId) {
         try {
             const messages = await channel.messages.fetch({ limit: 10 });
@@ -137,11 +139,10 @@ async function postOrUpdateStaffList(guild, channel) {
                 cachedStaffMessageId = existingBotMsg.id;
             }
         } catch (e) {
-            // Ignore fetch errors
+            // Ignore
         }
     }
 
-    // Edit existing message or send a new one if not found
     if (cachedStaffMessageId) {
         try {
             const oldMsg = await channel.messages.fetch(cachedStaffMessageId);
@@ -150,7 +151,6 @@ async function postOrUpdateStaffList(guild, channel) {
                 return;
             }
         } catch (e) {
-            // Message was hard deleted, clear cache so it posts a fresh one
             cachedStaffMessageId = null;
         }
     }
@@ -169,7 +169,6 @@ async function runQuotaEvaluation(guild, targetChannel) {
     const fetchedLogs = await punishmentChannel.messages.fetch({ limit: 100 });
     const staffActionCounts = {};
     
-    // Past 7 days window (Sunday to Sunday)
     const oneWeekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
 
     fetchedLogs.forEach(log => {
@@ -196,8 +195,14 @@ async function runQuotaEvaluation(guild, targetChannel) {
         for (const [memberId, member] of validMembers) {
             accountedQuotaMembers.add(member.id);
             const count = staffActionCounts[memberId] || 0;
-            const passed = count >= rank.quota;
-            report += `• ${member} — **${count}** logs (${passed ? '🟢 Passed' : '🔴 Failed'})\n`;
+            
+            // If quota is 0 (for Owners/Managers/Sr Admins), show logs without fail/pass requirement
+            if (rank.quota === 0) {
+                report += `• ${member} — **${count}** logs (Management)\n`;
+            } else {
+                const passed = count >= rank.quota;
+                report += `• ${member} — **${count}** logs (${passed ? '🟢 Passed' : '🔴 Failed'})\n`;
+            }
         }
         report += '\n';
     }

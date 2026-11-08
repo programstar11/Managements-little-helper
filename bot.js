@@ -54,7 +54,7 @@ function getStatusEmoji(status) {
 client.once('ready', () => {
     console.log(`Staff Bot online as ${client.user.tag}`);
 
-    // Auto-update staff list every 30 minutes
+    // Auto-update staff activity roster every 30 minutes
     cron.schedule('*/30 * * * *', async () => {
         try {
             const guild = client.guilds.cache.first();
@@ -86,54 +86,47 @@ client.once('ready', () => {
 async function postOrUpdateStaffList(guild, channel) {
     await guild.members.fetch({ withPresences: true });
 
-    let totalStaffCount = 0;
-    let onlineCount = 0;
+    let presentCount = 0;
     let absentCount = 0;
     let descriptionText = '';
     const accountedMembers = new Set();
 
     for (const rank of STAFF_LIST_RANKS) {
         const role = guild.roles.cache.get(rank.id);
-        
-        if (!role) {
-            descriptionText += `### 🛡️ ${rank.name} (0)\n> *No staff at this rank*\n\n`;
-            continue;
-        }
+        if (!role) continue;
 
         const validMembers = role.members.filter(member => !accountedMembers.has(member.id));
-        totalStaffCount += validMembers.size;
-
-        descriptionText += `### 🛡️ ${rank.name} (${validMembers.size})\n`;
         
-        if (validMembers.size === 0) {
-            descriptionText += `> *No staff at this rank*\n\n`;
-        } else {
+        if (validMembers.size > 0) {
             for (const [memberId, member] of validMembers) {
                 accountedMembers.add(member.id);
 
                 let ign = member.displayName.includes('|') ? member.displayName.split('|')[1].trim() : member.user.username;
                 const status = member.presence?.status || 'offline';
-                const emoji = getStatusEmoji(status);
-
-                if (status !== 'offline') onlineCount++;
-                else absentCount++;
-
-                descriptionText += `${emoji} <@${member.id}> - ${ign}\n`;
+                
+                if (status !== 'offline') {
+                    presentCount++;
+                    descriptionText += `${member} — **${ign}** — 🟢 Active\n`;
+                } else {
+                    absentCount++;
+                    descriptionText += `${member} — **${ign}** — Absent\n`;
+                }
             }
-            descriptionText += `\n`;
         }
     }
 
+    if (!descriptionText) descriptionText = 'No staff members found.';
+
     const embed = new EmbedBuilder()
         .setColor(0x3498db)
-        .setTitle('📊 Staff Activity & Roster')
+        .setTitle('📊 Staff Activity · Server Roster')
         .setDescription(descriptionText)
         .addFields(
-            { name: 'Present / Online', value: `${onlineCount}`, inline: true },
-            { name: 'Absent / Offline', value: `${absentCount}`, inline: true },
-            { name: 'Total Staff', value: `${totalStaffCount}`, inline: true }
+            { name: 'Present', value: `${presentCount}`, inline: true },
+            { name: 'Absent', value: `${absentCount}`, inline: true },
+            { name: 'Date', value: `${new Date().toISOString().split('T')[0]} · America/New_York`, inline: true }
         )
-        .setFooter({ text: `Automatically updated • Two-minute idle cutoff` })
+        .setFooter({ text: `BonkMC | Active Staff Roster · Two-minute idle cutoff` })
         .setTimestamp();
 
     if (!cachedStaffMessageId) {
@@ -205,20 +198,22 @@ async function runQuotaEvaluation(guild, targetChannel) {
             const count = staffActionCounts[memberId] || 0;
             const passed = rank.quota === 0 || count >= rank.quota;
 
-            // Styled individual report card matching your reference screenshot layout
-            const quotaEmbed = new EmbedBuilder()
+            // Exact menu card format matching your target reference screenshot layout
+            const reportEmbed = new EmbedBuilder()
                 .setColor(passed ? 0x2ecc71 : 0xe74c3c)
                 .setTitle('📊 Weekly Staff Quota')
                 .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
                 .addFields(
                     { name: 'Staff Member', value: `${member} (${rank.name})`, inline: false },
-                    { name: 'Status', value: passed ? '✅ Completed / Passed' : '❌ Failed Quota', inline: true },
-                    { name: 'Punishment Logs', value: `${count} / ${rank.quota} COMPLETED`, inline: true }
+                    { name: 'Status', value: passed ? '✅ Completed' : '❌ Failed', inline: true },
+                    { name: 'Period', value: `Sunday -> Sunday`, inline: true },
+                    { name: 'Punishment Logs Quota', value: `${count} / ${rank.quota} COMPLETED`, inline: false },
+                    { name: 'Ticket & Activity Quota', value: `Tracked via server metrics`, inline: false }
                 )
-                .setFooter({ text: `Automatically generated weekly quota evaluation` })
+                .setFooter({ text: `BonkMC | Automatically generated weekly staff activity report` })
                 .setTimestamp();
 
-            await targetChannel.send({ embeds: [quotaEmbed] });
+            await targetChannel.send({ embeds: [reportEmbed] });
         }
     }
 }
@@ -243,7 +238,7 @@ client.on('messageCreate', async message => {
         const quotaChannel = message.guild.channels.cache.get(QUOTA_LOGS_CHANNEL_ID);
         if (!quotaChannel) return message.reply('❌ Quota logs channel not found.');
 
-        await message.reply('🔄 Running structured quota evaluation cards...');
+        await message.reply('🔄 Generating exact weekly report cards...');
         await runQuotaEvaluation(message.guild, quotaChannel);
         return;
     }

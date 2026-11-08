@@ -20,7 +20,7 @@ const STAFF_LIST_CHANNEL_ID = '1568917305336004694';
 const QUOTA_LOGS_CHANNEL_ID = '1568917352710676601'; 
 const PUNISHMENT_LOGS_ID    = '1549094352406450272'; 
 
-// Ordered from highest rank to lowest rank (Owner & Manager added)
+// Ordered from highest rank to lowest rank
 const RANK_CONFIG = [
     { id: '1549094351810854997', name: 'Owner', quota: 0 },
     { id: '1549094351810854994', name: 'Manager', quota: 0 },
@@ -47,8 +47,8 @@ function getStatusEmoji(status) {
 client.once('ready', () => {
     console.log(`Staff Bot online as ${client.user.tag}`);
 
-    // Auto-update staff list every 15 minutes
-    cron.schedule('*/15 * * * *', async () => {
+    // 1. Auto-update staff list every 30 minutes
+    cron.schedule('*/30 * * * *', async () => {
         try {
             const guild = client.guilds.cache.first();
             if (!guild) return;
@@ -61,8 +61,8 @@ client.once('ready', () => {
         }
     });
 
-    // Auto-check quotas every Sunday at midnight
-    cron.schedule('0 0 * * 0', async () => {
+    // 2. Auto-check quotas every Sunday at exactly 12:00 PM (12:00)
+    cron.schedule('0 12 * * 0', async () => {
         try {
             const guild = client.guilds.cache.first();
             if (!guild) return;
@@ -127,7 +127,7 @@ async function postOrUpdateStaffList(guild, channel) {
                 return;
             }
         } catch (e) {
-            // Message was deleted, send a new one below
+            // Ignored if old message was deleted
         }
     }
 
@@ -142,24 +142,38 @@ async function runQuotaEvaluation(guild, targetChannel) {
         return;
     }
 
+    // Fetch messages from the log channel
     const fetchedLogs = await punishmentChannel.messages.fetch({ limit: 100 });
     const staffActionCounts = {};
+    
+    // Calculate exact time boundary (past 7 days from right now)
+    const oneWeekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
 
     fetchedLogs.forEach(log => {
-        let userId = log.author.id;
-        staffActionCounts[userId] = (staffActionCounts[userId] || 0) + 1;
+        // Only count messages created within the last 7 days (Sunday to Sunday window)
+        if (log.createdTimestamp >= oneWeekAgo) {
+            let userId = log.author.id;
+            staffActionCounts[userId] = (staffActionCounts[userId] || 0) + 1;
+        }
     });
 
     await guild.members.fetch();
-    let report = '📊 **Automated Weekly Quota Evaluation Report**\n\n';
+    let report = '📊 **Weekly Staff Quota Evaluation Report (Sunday - Sunday)**\n\n';
+    
+    const accountedQuotaMembers = new Set();
 
     for (const rank of RANK_CONFIG) {
         const role = guild.roles.cache.get(rank.id);
-        if (!role || role.members.size === 0) continue;
+        if (!role) continue;
+
+        // Filter out members already processed in higher ranks
+        const validMembers = role.members.filter(member => !accountedQuotaMembers.has(member.id));
+        if (validMembers.size === 0) continue;
 
         report += `**Rank: ${rank.name}** (Target: ${rank.quota} logs/week)\n`;
         
-        for (const [memberId, member] of role.members) {
+        for (const [memberId, member] of validMembers) {
+            accountedQuotaMembers.add(member.id);
             const count = staffActionCounts[memberId] || 0;
             const passed = count >= rank.quota;
             report += `• ${member} — **${count}** logs (${passed ? '🟢 Passed' : '🔴 Failed'})\n`;
@@ -173,7 +187,6 @@ async function runQuotaEvaluation(guild, targetChannel) {
 client.on('messageCreate', async message => {
     if (!message.guild || message.author.bot) return;
 
-    // Handle "!refreshstaff" command cleanly
     if (message.content === '!refreshstaff') {
         if (!message.member.permissions.has('Administrator')) return;
         
@@ -185,14 +198,13 @@ client.on('messageCreate', async message => {
         return;
     }
 
-    // Handle "!checkquota" command cleanly
     if (message.content === '!checkquota') {
         if (!message.member.permissions.has('ManageGuild')) return;
 
         const quotaChannel = message.guild.channels.cache.get(QUOTA_LOGS_CHANNEL_ID);
         if (!quotaChannel) return message.reply('❌ Quota logs channel not found.');
 
-        await message.reply('🔄 Running quota evaluation and posting to quota logs...');
+        await message.reply('🔄 Running precise weekly quota evaluation...');
         await runQuotaEvaluation(message.guild, quotaChannel);
         return;
     }

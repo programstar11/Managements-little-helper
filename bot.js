@@ -185,7 +185,8 @@ async function runQuotaEvaluation(guild, targetChannel, replyMessage = null) {
         }
     });
 
-    let leaderboardDescription = '';
+    // Collect all evaluated staff into an array for global leaderboard sorting
+    let evaluatedStaff = [];
 
     for (const rank of QUOTA_RANKS) {
         const role = guild.roles.cache.get(rank.id);
@@ -194,18 +195,33 @@ async function runQuotaEvaluation(guild, targetChannel, replyMessage = null) {
         const validMembers = role.members.filter(member => !accountedQuotaMembers.has(member.id));
         if (validMembers.size === 0) continue;
 
-        leaderboardDescription += `### 🛡️ ${rank.name} (Target: ${rank.quota})\n`;
-
         for (const [memberId, member] of validMembers) {
             accountedQuotaMembers.add(member.id);
             const count = staffActionCounts[memberId] || 0;
             const passed = rank.quota === 0 || count >= rank.quota;
-            
-            const statusIcon = rank.quota === 0 ? '👑' : (passed ? '🟢 PASSED' : '🔴 FAILED');
-            leaderboardDescription += `${statusIcon} ${member} — **${count} / ${rank.quota}** logs\n`;
+
+            evaluatedStaff.push({
+                member,
+                rankName: rank.name,
+                quota: rank.quota,
+                count,
+                passed
+            });
         }
-        leaderboardDescription += '\n';
     }
+
+    // Sort leaderboard from highest log count to lowest
+    evaluatedStaff.sort((a, b) => b.count - a.count);
+
+    let leaderboardDescription = '### 🏆 Global Quota Leaderboard (Highest to Lowest)\n\n';
+    
+    evaluatedStaff.forEach((entry, index) => {
+        const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`;
+        const statusIcon = entry.quota === 0 ? '👑 Exempt' : (entry.passed ? '🟢 PASSED' : '🔴 FAILED');
+        
+        leaderboardDescription += `${medal} ${entry.member} (${entry.rankName})\n`;
+        leaderboardDescription += `└ Logs: **${entry.count} / ${entry.quota}** — ${statusIcon}\n\n`;
+    });
 
     const leaderboardEmbed = new EmbedBuilder()
         .setColor(0x2ecc71)
@@ -241,7 +257,7 @@ client.on('messageCreate', async message => {
         const quotaChannel = message.guild.channels.cache.get(QUOTA_LOGS_CHANNEL_ID);
         if (!quotaChannel) return message.reply('❌ Quota logs channel not found.');
 
-        const initialReply = await message.reply('🔄 Calculating weekly quota leaderboard...');
+        const initialReply = await message.reply('🔄 Calculating transparent weekly quota leaderboard...');
         await runQuotaEvaluation(message.guild, quotaChannel, initialReply);
         return;
     }

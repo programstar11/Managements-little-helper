@@ -185,8 +185,8 @@ async function runQuotaEvaluation(guild, targetChannel, replyMessage = null) {
         }
     });
 
-    // Collect all evaluated staff into an array for global leaderboard sorting
-    let evaluatedStaff = [];
+    let passedList = [];
+    let failedList = [];
 
     for (const rank of QUOTA_RANKS) {
         const role = guild.roles.cache.get(rank.id);
@@ -200,33 +200,39 @@ async function runQuotaEvaluation(guild, targetChannel, replyMessage = null) {
             const count = staffActionCounts[memberId] || 0;
             const passed = rank.quota === 0 || count >= rank.quota;
 
-            evaluatedStaff.push({
-                member,
-                rankName: rank.name,
-                quota: rank.quota,
-                count,
-                passed
-            });
+            const entryText = `${member} (${rank.name}) — **${count} / ${rank.quota}** logs`;
+
+            if (passed) {
+                passedList.push(entryText);
+            } else {
+                failedList.push(entryText);
+            }
         }
     }
 
-    // Sort leaderboard from highest log count to lowest
-    evaluatedStaff.sort((a, b) => b.count - a.count);
+    let description = '';
 
-    let leaderboardDescription = '### 🏆 Global Quota Leaderboard (Highest to Lowest)\n\n';
-    
-    evaluatedStaff.forEach((entry, index) => {
-        const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `#${index + 1}`;
-        const statusIcon = entry.quota === 0 ? '👑 Exempt' : (entry.passed ? '🟢 PASSED' : '🔴 FAILED');
-        
-        leaderboardDescription += `${medal} ${entry.member} (${entry.rankName})\n`;
-        leaderboardDescription += `└ Logs: **${entry.count} / ${entry.quota}** — ${statusIcon}\n\n`;
-    });
+    // Category 1: Passed / Exempt
+    description += `### 🟢 Passed & Exempt Staff\n`;
+    if (passedList.length > 0) {
+        description += passedList.map(item => `• ${item}`).join('\n');
+    } else {
+        description += `> *None*\n`;
+    }
+    description += `\n\n`;
+
+    // Category 2: Failed Quota
+    description += `### 🔴 Failed Quota\n`;
+    if (failedList.length > 0) {
+        description += failedList.map(item => `• ${item}`).join('\n');
+    } else {
+        description += `> *None — All staff met their quotas!*\n`;
+    }
 
     const leaderboardEmbed = new EmbedBuilder()
-        .setColor(0x2ecc71)
+        .setColor(failedList.length > 0 ? 0xe74c3c : 0x2ecc71)
         .setTitle('📊 Weekly Staff Quota Leaderboard')
-        .setDescription(leaderboardDescription || 'No active staff found for quotas.')
+        .setDescription(description)
         .setFooter({ text: `Weekly Evaluation Report • Sunday to Sunday` })
         .setTimestamp();
 
@@ -257,7 +263,7 @@ client.on('messageCreate', async message => {
         const quotaChannel = message.guild.channels.cache.get(QUOTA_LOGS_CHANNEL_ID);
         if (!quotaChannel) return message.reply('❌ Quota logs channel not found.');
 
-        const initialReply = await message.reply('🔄 Calculating transparent weekly quota leaderboard...');
+        const initialReply = await message.reply('🔄 Generating separated quota leaderboard...');
         await runQuotaEvaluation(message.guild, quotaChannel, initialReply);
         return;
     }

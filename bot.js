@@ -20,11 +20,20 @@ const STAFF_LIST_CHANNEL_ID = '1568917305336004694';
 const QUOTA_LOGS_CHANNEL_ID = '1568917352710676601'; 
 const PUNISHMENT_LOGS_ID    = '1549094352406450272'; 
 
-// Ordered from highest rank to lowest rank
-const RANK_CONFIG = [
-    { id: '1549094351810854997', name: 'Owner', quota: 0 },
-    { id: '1549094351810854994', name: 'Manager', quota: 0 },
-    { id: '1550211533332811866', name: 'Senior Administrator', quota: 0 },
+// Full hierarchy used for the Staff List embed (All Ranks)
+const STAFF_LIST_RANKS = [
+    { id: '1549094351810854997', name: 'Owner' },
+    { id: '1549094351810854994', name: 'Manager' },
+    { id: '1550211533332811866', name: 'Senior Administrator' },
+    { id: '1549094351802474619', name: 'Administrator' },
+    { id: '1549094351794348182', name: 'Senior Moderator' },
+    { id: '1549094351794348181', name: 'Moderator' },
+    { id: '1549094351794348180', name: 'Helper' },
+    { id: '1549094351794348178', name: 'Trainee' }
+];
+
+// Restricted hierarchy used ONLY for Quota checks (Admin down to Trainee, excluding Owner/Manager/Sr. Admin)
+const QUOTA_RANKS = [
     { id: '1549094351802474619', name: 'Administrator', quota: 15 },
     { id: '1549094351794348182', name: 'Senior Moderator', quota: 10 },
     { id: '1549094351794348181', name: 'Moderator', quota: 8 },
@@ -61,7 +70,7 @@ client.once('ready', () => {
         }
     });
 
-    // 2. Auto-check quotas every Sunday at exactly 12:00 PM (12:00)
+    // 2. Auto-check quotas every Sunday at exactly 12:00 PM
     cron.schedule('0 12 * * 0', async () => {
         try {
             const guild = client.guilds.cache.first();
@@ -83,7 +92,7 @@ async function postOrUpdateStaffList(guild, channel) {
     let descriptionText = '';
     const accountedMembers = new Set();
 
-    for (const rank of RANK_CONFIG) {
+    for (const rank of STAFF_LIST_RANKS) {
         const role = guild.roles.cache.get(rank.id);
         
         if (!role) {
@@ -119,6 +128,20 @@ async function postOrUpdateStaffList(guild, channel) {
         .setFooter({ text: `Staff Team | ${totalStaffCount} staff members | Automatically updated` })
         .setTimestamp();
 
+    // Try to find the last bot message in the channel if cache is empty
+    if (!cachedStaffMessageId) {
+        try {
+            const messages = await channel.messages.fetch({ limit: 10 });
+            const existingBotMsg = messages.find(m => m.author.id === client.user.id && m.embeds.length > 0);
+            if (existingBotMsg) {
+                cachedStaffMessageId = existingBotMsg.id;
+            }
+        } catch (e) {
+            // Ignore fetch errors
+        }
+    }
+
+    // Edit existing message or send a new one if not found
     if (cachedStaffMessageId) {
         try {
             const oldMsg = await channel.messages.fetch(cachedStaffMessageId);
@@ -127,7 +150,8 @@ async function postOrUpdateStaffList(guild, channel) {
                 return;
             }
         } catch (e) {
-            // Ignored if old message was deleted
+            // Message was hard deleted, clear cache so it posts a fresh one
+            cachedStaffMessageId = null;
         }
     }
 
@@ -142,15 +166,13 @@ async function runQuotaEvaluation(guild, targetChannel) {
         return;
     }
 
-    // Fetch messages from the log channel
     const fetchedLogs = await punishmentChannel.messages.fetch({ limit: 100 });
     const staffActionCounts = {};
     
-    // Calculate exact time boundary (past 7 days from right now)
+    // Past 7 days window (Sunday to Sunday)
     const oneWeekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
 
     fetchedLogs.forEach(log => {
-        // Only count messages created within the last 7 days (Sunday to Sunday window)
         if (log.createdTimestamp >= oneWeekAgo) {
             let userId = log.author.id;
             staffActionCounts[userId] = (staffActionCounts[userId] || 0) + 1;
@@ -162,11 +184,10 @@ async function runQuotaEvaluation(guild, targetChannel) {
     
     const accountedQuotaMembers = new Set();
 
-    for (const rank of RANK_CONFIG) {
+    for (const rank of QUOTA_RANKS) {
         const role = guild.roles.cache.get(rank.id);
         if (!role) continue;
 
-        // Filter out members already processed in higher ranks
         const validMembers = role.members.filter(member => !accountedQuotaMembers.has(member.id));
         if (validMembers.size === 0) continue;
 

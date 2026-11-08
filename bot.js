@@ -15,40 +15,37 @@ const client = new Client({
     ]
 });
 
-// --- CONFIGURATION (Your Updated Channel IDs) ---
-const STAFF_LIST_CHANNEL_ID = '1568917305336004694'; // Staff list updates here every 15 mins
-const QUOTA_LOGS_CHANNEL_ID = '1568917352710676601'; // Quota check reports posted here
-const PUNISHMENT_LOGS_ID    = '1549094352406450272'; // People log punishments here
+// --- CONFIGURATION ---
+const STAFF_LIST_CHANNEL_ID = '1568917305336004694'; 
+const QUOTA_LOGS_CHANNEL_ID = '1568917352710676601'; 
+const PUNISHMENT_LOGS_ID    = '1549094352406450272'; 
 
-// Replace these placeholders with your actual Discord Role IDs and weekly quotas:
+// Your correct, exact server rank role IDs and weekly punishment quotas
 const RANK_CONFIG = [
-    { id: 'SENIOR_ADMIN_ROLE_ID', name: 'Senior Administrator', quota: 0 },
-    { id: 'ADMIN_ROLE_ID', name: 'Administrator', quota: 15 },
-    { id: 'JUNIOR_ADMIN_ROLE_ID', name: 'Junior Administrator', quota: 12 },
-    { id: 'SENIOR_MOD_ROLE_ID', name: 'Senior Moderator', quota: 10 },
-    { id: 'MOD_ROLE_ID', name: 'Moderator', quota: 8 },
-    { id: 'JUNIOR_MOD_ROLE_ID', name: 'Junior Moderator', quota: 5 },
-    { id: 'HELPER_ROLE_ID', name: 'Helper', quota: 3 },
-    { id: 'TRIAL_STAFF_ROLE_ID', name: 'Trial Staff', quota: 2 }
+    { id: '1550211533332811866', name: 'Senior Administrator', quota: 0 },
+    { id: '1549094351802474619', name: 'Administrator', quota: 15 },
+    { id: '1549094351794348182', name: 'Senior Moderator', quota: 10 },
+    { id: '1549094351794348181', name: 'Moderator', quota: 8 },
+    { id: '1549094351794348180', name: 'Helper', quota: 3 },
+    { id: '1549094351794348178', name: 'Trainee', quota: 2 }
 ];
 // ------------------------------------------------
 
 let cachedStaffMessageId = null;
 
-// Helper function to return status emoji
 function getStatusEmoji(status) {
     switch (status) {
         case 'online': return '🟢';
         case 'idle': return '🟡';
         case 'dnd': return '🔴';
-        default: return '⚪'; // offline
+        default: return '⚪'; 
     }
 }
 
 client.once('ready', () => {
     console.log(`Staff Bot online as ${client.user.tag}`);
 
-    // 1. Auto-update the staff list embed every 15 minutes
+    // Auto-update staff list every 15 minutes
     cron.schedule('*/15 * * * *', async () => {
         try {
             const guild = client.guilds.cache.first();
@@ -62,7 +59,7 @@ client.once('ready', () => {
         }
     });
 
-    // 2. Auto-check quotas every Sunday at midnight (or change schedule as needed)
+    // Auto-check quotas every Sunday at midnight
     cron.schedule('0 0 * * 0', async () => {
         try {
             const guild = client.guilds.cache.first();
@@ -77,7 +74,6 @@ client.once('ready', () => {
     });
 });
 
-// Function to generate and update the staff list layout
 async function postOrUpdateStaffList(guild, channel) {
     await guild.members.fetch({ withPresences: true });
 
@@ -126,7 +122,7 @@ async function postOrUpdateStaffList(guild, channel) {
                 return;
             }
         } catch (e) {
-            // Message was deleted, send a fresh one below
+            // Ignored if old message was cleared
         }
     }
 
@@ -134,11 +130,10 @@ async function postOrUpdateStaffList(guild, channel) {
     cachedStaffMessageId = newMsg.id;
 }
 
-// Function to calculate and post quota evaluations
 async function runQuotaEvaluation(guild, targetChannel) {
     const punishmentChannel = guild.channels.cache.get(PUNISHMENT_LOGS_ID);
     if (!punishmentChannel) {
-        await targetChannel.send('❌ Quota error: Punishment logs channel (`1549094352406450272`) could not be found.');
+        await targetChannel.send('❌ Quota error: Punishment logs channel could not be found.');
         return;
     }
 
@@ -170,20 +165,17 @@ async function runQuotaEvaluation(guild, targetChannel) {
     await targetChannel.send(report);
 }
 
-// Manual Command triggers
 client.on('messageCreate', async message => {
     if (!message.guild || message.author.bot) return;
 
-    // 1. Force refresh staff list: "!refreshstaff"
     if (message.content === '!refreshstaff' && message.member.permissions.has('Administrator')) {
         const channel = message.guild.channels.cache.get(STAFF_LIST_CHANNEL_ID);
         if (!channel) return message.reply('❌ Staff list channel not found.');
         
         await postOrUpdateStaffList(message.guild, channel);
-        await message.reply('✅ Staff list manually refreshed!');
+        await message.reply('✅ Staff list successfully refreshed!');
     }
 
-    // 2. Force manual quota check: "!checkquota" (Posts result to quota-logs channel)
     if (message.content === '!checkquota' && message.member.permissions.has('ManageGuild')) {
         const quotaChannel = message.guild.channels.cache.get(QUOTA_LOGS_CHANNEL_ID);
         if (!quotaChannel) return message.reply('❌ Quota logs channel not found.');

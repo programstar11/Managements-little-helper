@@ -20,7 +20,6 @@ const STAFF_LIST_CHANNEL_ID = '1568917305336004694';
 const QUOTA_LOGS_CHANNEL_ID = '1568917352710676601'; 
 const PUNISHMENT_LOGS_ID    = '1549094352406450272'; 
 
-// Full hierarchy used for the Staff List embed (Shows everyone)
 const STAFF_LIST_RANKS = [
     { id: '1549094351810854997', name: 'Owner' },
     { id: '1549094351810854994', name: 'Manager' },
@@ -32,7 +31,6 @@ const STAFF_LIST_RANKS = [
     { id: '1549094351794348178', name: 'Trainee' }
 ];
 
-// Quota hierarchy EXCLUDES Owner and Manager so they are skipped entirely
 const QUOTA_RANKS = [
     { id: '1550211533332811866', name: 'Senior Administrator', quota: 0 },
     { id: '1549094351802474619', name: 'Administrator', quota: 15 },
@@ -41,7 +39,6 @@ const QUOTA_RANKS = [
     { id: '1549094351794348180', name: 'Helper', quota: 3 },
     { id: '1549094351794348178', name: 'Trainee', quota: 2 }
 ];
-// ------------------------------------------------
 
 let cachedStaffMessageId = null;
 
@@ -57,7 +54,7 @@ function getStatusEmoji(status) {
 client.once('ready', () => {
     console.log(`Staff Bot online as ${client.user.tag}`);
 
-    // 1. Auto-update staff list every 30 minutes
+    // Auto-update staff list every 30 minutes
     cron.schedule('*/30 * * * *', async () => {
         try {
             const guild = client.guilds.cache.first();
@@ -71,7 +68,7 @@ client.once('ready', () => {
         }
     });
 
-    // 2. Auto-check quotas every Sunday at exactly 12:00 PM
+    // Auto-check quotas every Sunday at 12:00 PM
     cron.schedule('0 12 * * 0', async () => {
         try {
             const guild = client.guilds.cache.first();
@@ -148,7 +145,7 @@ async function postOrUpdateStaffList(guild, channel) {
                 await oldMsg.edit({ embeds: [embed] });
                 return;
             }
-        } else {
+        } catch (e) {
             cachedStaffMessageId = null;
         }
     }
@@ -179,7 +176,6 @@ async function runQuotaEvaluation(guild, targetChannel) {
     await guild.members.fetch();
     let report = '📊 **Weekly Staff Quota Evaluation Report (Sunday - Sunday)**\n\n';
     
-    // Explicitly add Owner and Manager role IDs to this skip set so anyone holding them is completely ignored in quotas
     const accountedQuotaMembers = new Set();
     const ownerAndManagerRoleIds = ['1549094351810854997', '1549094351810854994'];
 

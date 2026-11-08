@@ -20,8 +20,10 @@ const STAFF_LIST_CHANNEL_ID = '1568917305336004694';
 const QUOTA_LOGS_CHANNEL_ID = '1568917352710676601'; 
 const PUNISHMENT_LOGS_ID    = '1549094352406450272'; 
 
-// Ordered from highest rank to lowest rank
+// Ordered from highest rank to lowest rank (Owner & Manager added)
 const RANK_CONFIG = [
+    { id: '1549094351810854997', name: 'Owner', quota: 0 },
+    { id: '1549094351810854994', name: 'Manager', quota: 0 },
     { id: '1550211533332811866', name: 'Senior Administrator', quota: 0 },
     { id: '1549094351802474619', name: 'Administrator', quota: 15 },
     { id: '1549094351794348182', name: 'Senior Moderator', quota: 10 },
@@ -79,7 +81,7 @@ async function postOrUpdateStaffList(guild, channel) {
 
     let totalStaffCount = 0;
     let descriptionText = '';
-    const accountedMembers = new Set(); // Prevents members from showing up in multiple lower ranks
+    const accountedMembers = new Set();
 
     for (const rank of RANK_CONFIG) {
         const role = guild.roles.cache.get(rank.id);
@@ -89,7 +91,6 @@ async function postOrUpdateStaffList(guild, channel) {
             continue;
         }
 
-        // Filter out members already accounted for in a higher rank
         const validMembers = role.members.filter(member => !accountedMembers.has(member.id));
         
         totalStaffCount += validMembers.size;
@@ -99,7 +100,7 @@ async function postOrUpdateStaffList(guild, channel) {
             descriptionText += `> *No staff at this rank*\n\n`;
         } else {
             for (const [memberId, member] of validMembers) {
-                accountedMembers.add(member.id); // Mark as accounted for
+                accountedMembers.add(member.id);
 
                 let ign = member.displayName.includes('|') ? member.displayName.split('|')[1].trim() : member.user.username;
                 const status = member.presence?.status || 'offline';
@@ -118,7 +119,6 @@ async function postOrUpdateStaffList(guild, channel) {
         .setFooter({ text: `Staff Team | ${totalStaffCount} staff members | Automatically updated` })
         .setTimestamp();
 
-    // Try editing the cached message; if it fails or doesn't exist, send a new one
     if (cachedStaffMessageId) {
         try {
             const oldMsg = await channel.messages.fetch(cachedStaffMessageId);
@@ -127,7 +127,7 @@ async function postOrUpdateStaffList(guild, channel) {
                 return;
             }
         } catch (e) {
-            // Message was deleted manually, will send a new one below
+            // Message was deleted, send a new one below
         }
     }
 
@@ -146,17 +146,7 @@ async function runQuotaEvaluation(guild, targetChannel) {
     const staffActionCounts = {};
 
     fetchedLogs.forEach(log => {
-        // Track author ID
         let userId = log.author.id;
-        
-        // Also check if staff member is mentioned or named inside embeds/content if logged via another webhook/bot
-        if (log.embeds && log.embeds.length > 0) {
-            const embedText = log.embeds[0].description || '';
-            const embedTitle = log.embeds[0].title || '';
-            // If the message contains a user mention or text tag, we can attribute it
-            // Simple approach: count author, or check content mentions
-        }
-
         staffActionCounts[userId] = (staffActionCounts[userId] || 0) + 1;
     });
 
@@ -183,20 +173,28 @@ async function runQuotaEvaluation(guild, targetChannel) {
 client.on('messageCreate', async message => {
     if (!message.guild || message.author.bot) return;
 
-    if (message.content === '!refreshstaff' && message.member.permissions.has('Administrator')) {
+    // Handle "!refreshstaff" command cleanly
+    if (message.content === '!refreshstaff') {
+        if (!message.member.permissions.has('Administrator')) return;
+        
         const channel = message.guild.channels.cache.get(STAFF_LIST_CHANNEL_ID);
         if (!channel) return message.reply('❌ Staff list channel not found.');
         
         await postOrUpdateStaffList(message.guild, channel);
         await message.reply('✅ Staff list successfully refreshed!');
+        return;
     }
 
-    if (message.content === '!checkquota' && message.member.permissions.has('ManageGuild')) {
+    // Handle "!checkquota" command cleanly
+    if (message.content === '!checkquota') {
+        if (!message.member.permissions.has('ManageGuild')) return;
+
         const quotaChannel = message.guild.channels.cache.get(QUOTA_LOGS_CHANNEL_ID);
         if (!quotaChannel) return message.reply('❌ Quota logs channel not found.');
 
         await message.reply('🔄 Running quota evaluation and posting to quota logs...');
         await runQuotaEvaluation(message.guild, quotaChannel);
+        return;
     }
 });
 

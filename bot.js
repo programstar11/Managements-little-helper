@@ -205,14 +205,15 @@ async function runQuotaEvaluation(guild, targetChannel) {
             const count = staffActionCounts[memberId] || 0;
             const passed = rank.quota === 0 || count >= rank.quota;
 
-            // Generate clean individual card embed matching your requested layout style
+            // Styled individual report card matching your reference screenshot layout
             const quotaEmbed = new EmbedBuilder()
                 .setColor(passed ? 0x2ecc71 : 0xe74c3c)
                 .setTitle('📊 Weekly Staff Quota')
+                .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
                 .addFields(
                     { name: 'Staff Member', value: `${member} (${rank.name})`, inline: false },
                     { name: 'Status', value: passed ? '✅ Completed / Passed' : '❌ Failed Quota', inline: true },
-                    { name: 'Punishment Logs', value: `${count} / ${rank.quota} target`, inline: true }
+                    { name: 'Punishment Logs', value: `${count} / ${rank.quota} COMPLETED`, inline: true }
                 )
                 .setFooter({ text: `Automatically generated weekly quota evaluation` })
                 .setTimestamp();

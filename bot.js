@@ -54,7 +54,7 @@ function getStatusEmoji(status) {
 client.once('ready', () => {
     console.log(`Staff Bot online as ${client.user.tag}`);
 
-    // Auto-update staff activity roster every 30 minutes
+    // Auto-update staff roster every 30 minutes
     cron.schedule('*/30 * * * *', async () => {
         try {
             const guild = client.guilds.cache.first();
@@ -124,18 +124,16 @@ async function postOrUpdateStaffList(guild, channel) {
         .addFields(
             { name: 'Present', value: `${presentCount}`, inline: true },
             { name: 'Absent', value: `${absentCount}`, inline: true },
-            { name: 'Date', value: `${new Date().toISOString().split('T')[0]} · America/New_York`, inline: true }
+            { name: 'Date', value: `${new Date().toISOString().split('T')[0]}`, inline: true }
         )
-        .setFooter({ text: `BonkMC | Active Staff Roster · Two-minute idle cutoff` })
+        .setFooter({ text: `Active Staff Roster · Two-minute idle cutoff` })
         .setTimestamp();
 
     if (!cachedStaffMessageId) {
         try {
             const messages = await channel.messages.fetch({ limit: 10 });
             const existingBotMsg = messages.find(m => m.author.id === client.user.id && m.embeds.length > 0);
-            if (existingBotMsg) {
-                cachedStaffMessageId = existingBotMsg.id;
-            }
+            if (existingBotMsg) cachedStaffMessageId = existingBotMsg.id;
         } catch (e) {}
     }
 
@@ -155,16 +153,17 @@ async function postOrUpdateStaffList(guild, channel) {
     cachedStaffMessageId = newMsg.id;
 }
 
-async function runQuotaEvaluation(guild, targetChannel) {
+async function runQuotaEvaluation(guild, targetChannel, replyMessage = null) {
     const punishmentChannel = guild.channels.cache.get(PUNISHMENT_LOGS_ID);
     if (!punishmentChannel) {
-        await targetChannel.send('❌ Quota error: Punishment logs channel could not be found.');
+        const errText = '❌ Quota error: Punishment logs channel could not be found.';
+        if (replyMessage) await replyMessage.edit(errText);
+        else await targetChannel.send(errText);
         return;
     }
 
     const fetchedLogs = await punishmentChannel.messages.fetch({ limit: 100 });
     const staffActionCounts = {};
-    
     const oneWeekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
 
     fetchedLogs.forEach(log => {
@@ -186,6 +185,8 @@ async function runQuotaEvaluation(guild, targetChannel) {
         }
     });
 
+    let leaderboardDescription = '';
+
     for (const rank of QUOTA_RANKS) {
         const role = guild.roles.cache.get(rank.id);
         if (!role) continue;
@@ -193,28 +194,30 @@ async function runQuotaEvaluation(guild, targetChannel) {
         const validMembers = role.members.filter(member => !accountedQuotaMembers.has(member.id));
         if (validMembers.size === 0) continue;
 
+        leaderboardDescription += `### 🛡️ ${rank.name} (Target: ${rank.quota})\n`;
+
         for (const [memberId, member] of validMembers) {
             accountedQuotaMembers.add(member.id);
             const count = staffActionCounts[memberId] || 0;
             const passed = rank.quota === 0 || count >= rank.quota;
-
-            // Exact menu card format matching your target reference screenshot layout
-            const reportEmbed = new EmbedBuilder()
-                .setColor(passed ? 0x2ecc71 : 0xe74c3c)
-                .setTitle('📊 Weekly Staff Quota')
-                .setThumbnail(member.user.displayAvatarURL({ dynamic: true }))
-                .addFields(
-                    { name: 'Staff Member', value: `${member} (${rank.name})`, inline: false },
-                    { name: 'Status', value: passed ? '✅ Completed' : '❌ Failed', inline: true },
-                    { name: 'Period', value: `Sunday -> Sunday`, inline: true },
-                    { name: 'Punishment Logs Quota', value: `${count} / ${rank.quota} COMPLETED`, inline: false },
-                    { name: 'Ticket & Activity Quota', value: `Tracked via server metrics`, inline: false }
-                )
-                .setFooter({ text: `BonkMC | Automatically generated weekly staff activity report` })
-                .setTimestamp();
-
-            await targetChannel.send({ embeds: [reportEmbed] });
+            
+            const statusIcon = rank.quota === 0 ? '👑' : (passed ? '🟢 PASSED' : '🔴 FAILED');
+            leaderboardDescription += `${statusIcon} ${member} — **${count} / ${rank.quota}** logs\n`;
         }
+        leaderboardDescription += '\n';
+    }
+
+    const leaderboardEmbed = new EmbedBuilder()
+        .setColor(0x2ecc71)
+        .setTitle('📊 Weekly Staff Quota Leaderboard')
+        .setDescription(leaderboardDescription || 'No active staff found for quotas.')
+        .setFooter({ text: `Weekly Evaluation Report • Sunday to Sunday` })
+        .setTimestamp();
+
+    if (replyMessage) {
+        await replyMessage.edit({ content: null, embeds: [leaderboardEmbed] });
+    } else {
+        await targetChannel.send({ embeds: [leaderboardEmbed] });
     }
 }
 
@@ -238,8 +241,8 @@ client.on('messageCreate', async message => {
         const quotaChannel = message.guild.channels.cache.get(QUOTA_LOGS_CHANNEL_ID);
         if (!quotaChannel) return message.reply('❌ Quota logs channel not found.');
 
-        await message.reply('🔄 Generating exact weekly report cards...');
-        await runQuotaEvaluation(message.guild, quotaChannel);
+        const initialReply = await message.reply('🔄 Calculating weekly quota leaderboard...');
+        await runQuotaEvaluation(message.guild, quotaChannel, initialReply);
         return;
     }
 });

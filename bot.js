@@ -58,6 +58,9 @@ const EXCLUDED_QUOTA_ROLE_IDS = [
 ];
 
 let cachedStaffMessageId = null;
+let cachedQuotaMessageId = null;
+let isRefreshingRoster = false;
+let isEvaluatingQuota = false;
 
 function getStatusEmoji(status) {
     switch (status) {
@@ -104,6 +107,42 @@ async function resolveLogThread(guild, threadConfig) {
     return thread;
 }
 
+async function upsertSingleEmbedMessage(channel, cachedIdRef, titlePrefix, embed) {
+    let messageId = cachedIdRef.get();
+
+    if (!messageId) {
+        try {
+            const recentMessages = await channel.messages.fetch({ limit: 20 });
+            const existing = recentMessages.find(
+                m => m.author.id === client.user.id &&
+                     m.embeds.length > 0 &&
+                     (m.embeds[0].title || '').startsWith(titlePrefix)
+            );
+            if (existing) {
+                messageId = existing.id;
+                cachedIdRef.set(messageId);
+            }
+        } catch (e) {}
+    }
+
+    if (messageId) {
+        try {
+            const existingMsg = await channel.messages.fetch(messageId);
+            if (existingMsg) {
+                await existingMsg.edit({ content: null, embeds: [embed] });
+                return existingMsg;
+            }
+        } catch (e) {
+            // Message was deleted or inaccessible; clear cache and post a clean replacement
+            cachedIdRef.set(null);
+        }
+    }
+
+    const sentMsg = await channel.send({ embeds: [embed] });
+    cachedIdRef.set(sentMsg.id);
+    return sentMsg;
+}
+
 client.once('ready', () => {
     console.log(`Staff Bot online as ${client.user.tag}`);
 
@@ -137,204 +176,218 @@ client.once('ready', () => {
 });
 
 async function postOrUpdateStaffList(guild, channel) {
-    await guild.members.fetch({ withPresences: true });
+    if (isRefreshingRoster) return;
+    isRefreshingRoster = true;
 
-    let totalStaffCount = 0;
-    let presentCount = 0;
-    let absentCount = 0;
-    let descriptionText = '';
-    const accountedMembers = new Set();
+    try {
+        await guild.members.fetch({ withPresences: true });
 
-    for (const rank of STAFF_LIST_RANKS) {
-        const role = guild.roles.cache.get(rank.id);
-        if (!role) {
-            descriptionText += `### 🛡️ ${rank.name} (0)\n> *Role not found*\n\n`;
-            continue;
-        }
+        let totalStaffCount = 0;
+        let presentCount = 0;
+        let absentCount = 0;
+        let descriptionText = '';
+        const accountedMembers = new Set();
 
-        const validMembers = role.members.filter(member => !member.user.bot && !accountedMembers.has(member.id));
-        totalStaffCount += validMembers.size;
+        for (const rank of STAFF_LIST_RANKS) {
+            const role = guild.roles.cache.get(rank.id);
+            if (!role) {
+                descriptionText += `### 🛡️ ${rank.name} (0)\n> *Role not found*\n\n`;
+                continue;
+            }
 
-        descriptionText += `### 🛡️ ${rank.name} (${validMembers.size})\n`;
+            const validMembers = role.members.filter(member => !member.user.bot && !accountedMembers.has(member.id));
+            totalStaffCount += validMembers.size;
 
-        if (validMembers.size === 0) {
-            descriptionText += `> *No staff at this rank*\n\n`;
-        } else {
-            for (const [, member] of validMembers) {
-                accountedMembers.add(member.id);
+            descriptionText += `### 🛡️ ${rank.name} (${validMembers.size})\n`;
 
-                const ign = member.displayName.includes('|')
-                    ? member.displayName.split('|')[1].trim()
-                    : member.displayName;
-                const status = member.presence?.status || 'offline';
-                const emoji = getStatusEmoji(status);
-                const label = getStatusLabel(status);
+            if (validMembers.size === 0) {
+                descriptionText += `> *No staff at this rank*\n\n`;
+            } else {
+                for (const [, member] of validMembers) {
+                    accountedMembers.add(member.id);
 
-                if (status !== 'offline') {
-                    presentCount++;
-                } else {
-                    absentCount++;
+                    const ign = member.displayName.includes('|')
+                        ? member.displayName.split('|')[1].trim()
+                        : member.displayName;
+                    const status = member.presence?.status || 'offline';
+                    const emoji = getStatusEmoji(status);
+                    const label = getStatusLabel(status);
+
+                    if (status !== 'offline') {
+                        presentCount++;
+                    } else {
+                        absentCount++;
+                    }
+
+                    descriptionText += `${emoji} ${member} — **${ign}** *(${label})*\n`;
                 }
-
-                descriptionText += `${emoji} ${member} — **${ign}** *(${label})*\n`;
+                descriptionText += `\n`;
             }
-            descriptionText += `\n`;
         }
+
+        const embed = new EmbedBuilder()
+            .setColor(0x3498db)
+            .setTitle('📊 Staff Activity · Server Roster')
+            .setDescription(descriptionText.trim() || '*No staff members found.*')
+            .addFields(
+                { name: '🟢 Present', value: `${presentCount}`, inline: true },
+                { name: '⚪ Absent', value: `${absentCount}`, inline: true },
+                { name: '👥 Total Staff', value: `${totalStaffCount}`, inline: true }
+            )
+            .setFooter({ text: `Staff Roster • Updated ${new Date().toISOString().split('T')[0]}` })
+            .setTimestamp();
+
+        await upsertSingleEmbedMessage(
+            channel,
+            {
+                get: () => cachedStaffMessageId,
+                set: (id) => { cachedStaffMessageId = id; }
+            },
+            '📊 Staff Activity · Server Roster',
+            embed
+        );
+    } finally {
+        isRefreshingRoster = false;
     }
-
-    const embed = new EmbedBuilder()
-        .setColor(0x3498db)
-        .setTitle('📊 Staff Activity · Server Roster')
-        .setDescription(descriptionText.trim() || '*No staff members found.*')
-        .addFields(
-            { name: '🟢 Present', value: `${presentCount}`, inline: true },
-            { name: '⚪ Absent', value: `${absentCount}`, inline: true },
-            { name: '👥 Total Staff', value: `${totalStaffCount}`, inline: true }
-        )
-        .setFooter({ text: `Staff Roster • Updated ${new Date().toISOString().split('T')[0]}` })
-        .setTimestamp();
-
-    if (!cachedStaffMessageId) {
-        try {
-            const messages = await channel.messages.fetch({ limit: 15 });
-            const existingBotMsg = messages.find(m => m.author.id === client.user.id && m.embeds.length > 0);
-            if (existingBotMsg) cachedStaffMessageId = existingBotMsg.id;
-        } catch (e) {}
-    }
-
-    if (cachedStaffMessageId) {
-        try {
-            const oldMsg = await channel.messages.fetch(cachedStaffMessageId);
-            if (oldMsg) {
-                await oldMsg.edit({ embeds: [embed] });
-                return;
-            }
-        } catch (e) {
-            cachedStaffMessageId = null;
-        }
-    }
-
-    const newMsg = await channel.send({ embeds: [embed] });
-    cachedStaffMessageId = newMsg.id;
 }
 
 async function runQuotaEvaluation(guild, targetChannel, triggerMessage = null) {
-    const oneWeekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
-    const staffStats = {}; // userId -> { total, discordBans, discordMutes, ingameMutes, ingameBans }
-
-    const ensureUserStats = (userId) => {
-        if (!staffStats[userId]) {
-            staffStats[userId] = {
-                total: 0,
-                discordBans: 0,
-                discordMutes: 0,
-                ingameMutes: 0,
-                ingameBans: 0
-            };
+    if (isEvaluatingQuota) {
+        if (triggerMessage) {
+            await triggerMessage.edit('⏳ A quota evaluation is already running.');
         }
-        return staffStats[userId];
-    };
-
-    for (const threadConfig of LOG_THREADS) {
-        const thread = await resolveLogThread(guild, threadConfig);
-        if (!thread) {
-            console.warn(`Could not resolve log thread: ${threadConfig.label} (${threadConfig.id})`);
-            continue;
-        }
-
-        try {
-            const messages = await thread.messages.fetch({ limit: 100 });
-            messages.forEach(msg => {
-                if (msg.createdTimestamp >= oneWeekAgo && msg.author && !msg.author.bot) {
-                    const stats = ensureUserStats(msg.author.id);
-                    stats[threadConfig.key] += 1;
-                    stats.total += 1;
-                }
-            });
-        } catch (err) {
-            console.error(`Failed fetching messages from ${threadConfig.label}:`, err);
-        }
+        return;
     }
+    isEvaluatingQuota = true;
 
-    await guild.members.fetch();
+    try {
+        const oneWeekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+        const staffStats = {};
 
-    const accountedQuotaMembers = new Set();
+        const ensureUserStats = (userId) => {
+            if (!staffStats[userId]) {
+                staffStats[userId] = {
+                    total: 0,
+                    discordBans: 0,
+                    discordMutes: 0,
+                    ingameMutes: 0,
+                    ingameBans: 0
+                };
+            }
+            return staffStats[userId];
+        };
 
-    for (const roleId of EXCLUDED_QUOTA_ROLE_IDS) {
-        const role = guild.roles.cache.get(roleId);
-        if (role) {
-            role.members.forEach(member => accountedQuotaMembers.add(member.id));
-        }
-    }
+        for (const threadConfig of LOG_THREADS) {
+            const thread = await resolveLogThread(guild, threadConfig);
+            if (!thread) {
+                console.warn(`Could not resolve log thread: ${threadConfig.label} (${threadConfig.id})`);
+                continue;
+            }
 
-    const passedList = [];
-    const failedList = [];
-
-    for (const rank of QUOTA_RANKS) {
-        const role = guild.roles.cache.get(rank.id);
-        if (!role) continue;
-
-        const validMembers = role.members.filter(member => !member.user.bot && !accountedQuotaMembers.has(member.id));
-        if (validMembers.size === 0) continue;
-
-        for (const [memberId, member] of validMembers) {
-            accountedQuotaMembers.add(member.id);
-
-            const stats = staffStats[memberId] || {
-                total: 0,
-                discordBans: 0,
-                discordMutes: 0,
-                ingameMutes: 0,
-                ingameBans: 0
-            };
-
-            const passed = rank.quota === 0 || stats.total >= rank.quota;
-            const breakdown = `IG Bans: **${stats.ingameBans}** • IG Mutes: **${stats.ingameMutes}** • DC Bans: **${stats.discordBans}** • DC Mutes: **${stats.discordMutes}**`;
-            const entry = `${member} **(${rank.name})** — **${stats.total} / ${rank.quota}** logs\n└ ${breakdown}`;
-
-            if (passed) {
-                passedList.push({ total: stats.total, text: entry });
-            } else {
-                failedList.push({ total: stats.total, text: entry });
+            try {
+                const messages = await thread.messages.fetch({ limit: 100 });
+                messages.forEach(msg => {
+                    if (msg.createdTimestamp >= oneWeekAgo && msg.author && !msg.author.bot) {
+                        const stats = ensureUserStats(msg.author.id);
+                        stats[threadConfig.key] += 1;
+                        stats.total += 1;
+                    }
+                });
+            } catch (err) {
+                console.error(`Failed fetching messages from ${threadConfig.label}:`, err);
             }
         }
-    }
 
-    passedList.sort((a, b) => b.total - a.total);
-    failedList.sort((a, b) => b.total - a.total);
+        await guild.members.fetch();
 
-    let description = `**Period:** Last 7 Days (Sunday → Sunday)\n\n`;
+        const accountedQuotaMembers = new Set();
 
-    description += `### 🟢 Passed & Exempt (${passedList.length})\n`;
-    description += passedList.length > 0
-        ? passedList.map(item => `• ${item.text}`).join('\n\n')
-        : `> *None*\n`;
+        for (const roleId of EXCLUDED_QUOTA_ROLE_IDS) {
+            const role = guild.roles.cache.get(roleId);
+            if (role) {
+                role.members.forEach(member => accountedQuotaMembers.add(member.id));
+            }
+        }
 
-    description += `\n\n### 🔴 Failed Quota (${failedList.length})\n`;
-    description += failedList.length > 0
-        ? failedList.map(item => `• ${item.text}`).join('\n\n')
-        : `> *None — All evaluated staff met their quota!*\n`;
+        const passedList = [];
+        const failedList = [];
 
-    const totalEvaluated = passedList.length + failedList.length;
-    const passRate = totalEvaluated > 0 ? Math.round((passedList.length / totalEvaluated) * 100) : 100;
+        for (const rank of QUOTA_RANKS) {
+            const role = guild.roles.cache.get(rank.id);
+            if (!role) continue;
 
-    const leaderboardEmbed = new EmbedBuilder()
-        .setColor(failedList.length > 0 ? 0xe74c3c : 0x2ecc71)
-        .setTitle('📊 Weekly Staff Quota Leaderboard')
-        .setDescription(description)
-        .addFields(
-            { name: '👥 Evaluated', value: `${totalEvaluated}`, inline: true },
-            { name: '🟢 Passed', value: `${passedList.length}`, inline: true },
-            { name: '🔴 Failed', value: `${failedList.length}`, inline: true },
-            { name: '📈 Pass Rate', value: `${passRate}%`, inline: true }
-        )
-        .setFooter({ text: `Weekly Quota Evaluation • Automated Report` })
-        .setTimestamp();
+            const validMembers = role.members.filter(member => !member.user.bot && !accountedQuotaMembers.has(member.id));
+            if (validMembers.size === 0) continue;
 
-    if (triggerMessage) {
-        await triggerMessage.edit({ content: null, embeds: [leaderboardEmbed] });
-    } else {
-        await targetChannel.send({ embeds: [leaderboardEmbed] });
+            for (const [memberId, member] of validMembers) {
+                accountedQuotaMembers.add(member.id);
+
+                const stats = staffStats[memberId] || {
+                    total: 0,
+                    discordBans: 0,
+                    discordMutes: 0,
+                    ingameMutes: 0,
+                    ingameBans: 0
+                };
+
+                const passed = rank.quota === 0 || stats.total >= rank.quota;
+                const breakdown = `IG Bans: **${stats.ingameBans}** • IG Mutes: **${stats.ingameMutes}** • DC Bans: **${stats.discordBans}** • DC Mutes: **${stats.discordMutes}**`;
+                const entry = `${member} **(${rank.name})** — **${stats.total} / ${rank.quota}** logs\n└ ${breakdown}`;
+
+                if (passed) {
+                    passedList.push({ total: stats.total, text: entry });
+                } else {
+                    failedList.push({ total: stats.total, text: entry });
+                }
+            }
+        }
+
+        passedList.sort((a, b) => b.total - a.total);
+        failedList.sort((a, b) => b.total - a.total);
+
+        let description = `**Period:** Last 7 Days (Sunday → Sunday)\n\n`;
+
+        description += `### 🟢 Passed & Exempt (${passedList.length})\n`;
+        description += passedList.length > 0
+            ? passedList.map(item => `• ${item.text}`).join('\n\n')
+            : `> *None*\n`;
+
+        description += `\n\n### 🔴 Failed Quota (${failedList.length})\n`;
+        description += failedList.length > 0
+            ? failedList.map(item => `• ${item.text}`).join('\n\n')
+            : `> *None — All evaluated staff met their quota!*\n`;
+
+        const totalEvaluated = passedList.length + failedList.length;
+        const passRate = totalEvaluated > 0 ? Math.round((passedList.length / totalEvaluated) * 100) : 100;
+
+        const leaderboardEmbed = new EmbedBuilder()
+            .setColor(failedList.length > 0 ? 0xe74c3c : 0x2ecc71)
+            .setTitle('📊 Weekly Staff Quota Leaderboard')
+            .setDescription(description)
+            .addFields(
+                { name: '👥 Evaluated', value: `${totalEvaluated}`, inline: true },
+                { name: '🟢 Passed', value: `${passedList.length}`, inline: true },
+                { name: '🔴 Failed', value: `${failedList.length}`, inline: true },
+                { name: '📈 Pass Rate', value: `${passRate}%`, inline: true }
+            )
+            .setFooter({ text: `Weekly Quota Evaluation • Automated Report` })
+            .setTimestamp();
+
+        await upsertSingleEmbedMessage(
+            targetChannel,
+            {
+                get: () => cachedQuotaMessageId,
+                set: (id) => { cachedQuotaMessageId = id; }
+            },
+            '📊 Weekly Staff Quota Leaderboard',
+            leaderboardEmbed
+        );
+
+        if (triggerMessage) {
+            await triggerMessage.edit('✅ Quota leaderboard updated without duplicates.');
+        }
+    } finally {
+        isEvaluatingQuota = false;
     }
 }
 
@@ -347,7 +400,7 @@ client.on('messageCreate', async message => {
         const channel = message.guild.channels.cache.get(STAFF_LIST_CHANNEL_ID) || await message.guild.channels.fetch(STAFF_LIST_CHANNEL_ID).catch(() => null);
         if (!channel) return message.reply('❌ Staff list channel not found.');
 
-        const statusMsg = await message.reply('🔄 Refreshing staff roster...');
+        const statusMsg = await message.reply('🔄 Updating staff roster...');
         await postOrUpdateStaffList(message.guild, channel);
         await statusMsg.edit('✅ Staff roster updated.');
         return;
@@ -359,7 +412,7 @@ client.on('messageCreate', async message => {
         const quotaChannel = message.guild.channels.cache.get(QUOTA_LOGS_CHANNEL_ID) || await message.guild.channels.fetch(QUOTA_LOGS_CHANNEL_ID).catch(() => null);
         if (!quotaChannel) return message.reply('❌ Quota logs channel not found.');
 
-        const statusMsg = await message.reply('🔄 Calculating weekly quota leaderboard...');
+        const statusMsg = await message.reply('🔄 Updating weekly quota leaderboard...');
         await runQuotaEvaluation(message.guild, quotaChannel, statusMsg);
         return;
     }

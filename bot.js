@@ -33,6 +33,7 @@ const STAFF_LIST_RANKS = [
     { id: '1568759466252308497', name: 'Owner' },
     { id: '1573407656247304303', name: 'Co-Owner' },
     { id: '1568759466252308496', name: 'Director' },
+    { id: '1573596426662056057', name: 'Manager' },
     { id: '1568759466227269647', name: 'Developer' },
     { id: '1568759466227269645', name: 'Sr. Admin' },
     { id: '1568759466227269644', name: 'Admin' },
@@ -55,6 +56,7 @@ const EXCLUDED_QUOTA_ROLE_IDS = [
     '1568759466252308497', // Owner
     '1573407656247304303', // Co-Owner
     '1568759466252308496', // Director
+    '1573596426662056057', // Manager
     '1568759466227269647'  // Developer
 ];
 
